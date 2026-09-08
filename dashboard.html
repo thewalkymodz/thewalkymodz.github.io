@@ -700,6 +700,7 @@
     </div>
   </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/canvas-to-video@1.0.0/dist/index.umd.js"></script>
   <script>
     // User Management
     const userNameLabel = document.getElementById('userNameLabel');
@@ -799,7 +800,7 @@
       uploadArea.style.display = 'block';
     });
 
-    // Generate Video
+    // Generate Video - Improved version
     generateBtn.addEventListener('click', async () => {
       const prompt = videoPrompt.value.trim();
       
@@ -817,10 +818,10 @@
         // Simulate generation time
         await new Promise(resolve => setTimeout(resolve, 2500));
 
-        // Create demo video with or without image
-        const canvas = createDemoVideoCanvas();
-        generatedVideoBlob = await canvasToBlob(canvas);
-        generatedVideoUrl = URL.createObjectURL(generatedVideoBlob);
+        // Generate video frames and create WebM/MP4
+        const videoBlob = await generateVideoBlob();
+        generatedVideoUrl = URL.createObjectURL(videoBlob);
+        generatedVideoBlob = videoBlob;
 
         // Display video
         displayGeneratedVideo();
@@ -838,6 +839,7 @@
         downloadBtn.style.display = 'block';
 
       } catch (error) {
+        console.error('Error generando video:', error);
         alert('Error al generar el video: ' + error.message);
         generatingStatus.classList.remove('active');
       } finally {
@@ -846,11 +848,124 @@
       }
     });
 
+    // Generate Video Blob with proper codec
+    async function generateVideoBlob() {
+      const duration = parseInt(videoDuration.value) || 10;
+      const fps = 24;
+      const totalFrames = duration * fps;
+
+      const ratios = {
+        '16:9': { w: 1280, h: 720 },
+        '9:16': { w: 720, h: 1280 },
+        '1:1': { w: 1024, h: 1024 }
+      };
+      
+      const ratio = ratios[aspectRatio.value] || ratios['16:9'];
+      const width = ratio.w;
+      const height = ratio.h;
+
+      return new Promise((resolve, reject) => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+
+          const chunks = [];
+          const canvasStream = canvas.captureStream(fps);
+          const mediaRecorder = new MediaRecorder(canvasStream, {
+            mimeType: 'video/webm;codecs=vp9'
+          });
+
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) chunks.push(e.data);
+          };
+
+          mediaRecorder.onstop = () => {
+            const blob = new Blob(chunks, { type: 'video/webm' });
+            resolve(blob);
+          };
+
+          mediaRecorder.start();
+
+          // Animate frames
+          let frameIndex = 0;
+          const animationInterval = setInterval(() => {
+            if (frameIndex >= totalFrames) {
+              clearInterval(animationInterval);
+              mediaRecorder.stop();
+              return;
+            }
+
+            const progress = frameIndex / totalFrames;
+            drawFrame(ctx, width, height, frameIndex, progress);
+            frameIndex++;
+          }, 1000 / fps);
+
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }
+
+    // Draw individual frame
+    function drawFrame(ctx, width, height, frameIndex, progress) {
+      // Background gradient animation
+      const gradient = ctx.createLinearGradient(0, 0, width, height);
+      gradient.addColorStop(0, `hsl(${240 + progress * 30}, 50%, ${20 + progress * 10}%)`);
+      gradient.addColorStop(1, `hsl(${280 + progress * 20}, 50%, ${15 + progress * 10}%)`);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+
+      // Draw image if uploaded
+      if (uploadedImageData) {
+        const img = new Image();
+        img.src = uploadedImageData;
+        img.onload = () => {
+          const imgSize = Math.min(width, height) * 0.5;
+          const x = (width - imgSize) / 2;
+          const y = (height - imgSize) / 2;
+          
+          ctx.save();
+          ctx.globalAlpha = 0.8 + Math.sin(progress * Math.PI * 2) * 0.2;
+          ctx.drawImage(img, x, y, imgSize, imgSize);
+          ctx.restore();
+        };
+      }
+
+      // Title
+      ctx.fillStyle = '#65d9ff';
+      ctx.font = `bold ${Math.floor(height * 0.1)}px Inter, Arial`;
+      ctx.textAlign = 'center';
+      ctx.fillText('th3dr4k3r.ia', width / 2, height * 0.15);
+
+      // Subtitle
+      ctx.font = `${Math.floor(height * 0.04)}px Inter, Arial`;
+      ctx.fillStyle = '#9bb0ca';
+      ctx.fillText('Video Generado con IA', width / 2, height * 0.85);
+
+      // Animated shapes
+      ctx.fillStyle = `hsla(${frameIndex * 6}, 100%, 50%, 0.2)`;
+      const size = (width * 0.15) + Math.sin(progress * Math.PI * 2) * (width * 0.1);
+      ctx.beginPath();
+      ctx.arc(width / 2, height / 2, size / 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = `hsla(${frameIndex * 6 + 180}, 100%, 50%, 0.15)`;
+      const rectSize = (width * 0.12) + Math.cos(progress * Math.PI * 2) * (width * 0.08);
+      ctx.fillRect(width / 2 - rectSize / 2, height / 2 - rectSize / 2, rectSize, rectSize);
+
+      // Duration at bottom
+      ctx.fillStyle = '#65d9ff';
+      ctx.font = `bold ${Math.floor(height * 0.06)}px Inter, Arial`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`${videoDuration.value}s`, width / 2, height * 0.95);
+    }
+
     // Display Generated Video
     function displayGeneratedVideo() {
       videoContent.innerHTML = '';
       
-      // Crear contenedor relativo para el badge de duración
       const videoWrapper = document.createElement('div');
       videoWrapper.style.position = 'relative';
       
@@ -863,7 +978,6 @@
       video.style.display = 'block';
       video.style.borderRadius = '12px';
 
-      // Badge con la duración
       const durationBadge = document.createElement('div');
       durationBadge.className = 'duration-display';
       durationBadge.textContent = `⏱️ ${videoDuration.value}s`;
@@ -871,95 +985,6 @@
       videoWrapper.appendChild(video);
       videoWrapper.appendChild(durationBadge);
       videoContent.appendChild(videoWrapper);
-    }
-
-    // Create Demo Video Canvas (with optional image integration)
-    function createDemoVideoCanvas() {
-      const canvas = document.createElement('canvas');
-      
-      // Set dimensions based on aspect ratio
-      const ratios = {
-        '16:9': { w: 1280, h: 720 },
-        '9:16': { w: 720, h: 1280 },
-        '1:1': { w: 1024, h: 1024 }
-      };
-      
-      const ratio = ratios[aspectRatio.value] || ratios['16:9'];
-      canvas.width = ratio.w;
-      canvas.height = ratio.h;
-      
-      const ctx = canvas.getContext('2d');
-
-      // Draw animated frames
-      const frameCount = 60;
-      for (let i = 0; i < frameCount; i++) {
-        // Background gradient
-        const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-        gradient.addColorStop(0, `hsl(240, 50%, ${20 + (i % 20)}%)`);
-        gradient.addColorStop(1, `hsl(280, 50%, ${15 + (i % 15)}%)`);
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // If user uploaded an image, draw it in the center
-        if (uploadedImageData) {
-          const img = new Image();
-          img.src = uploadedImageData;
-          img.onload = () => {
-            const imgSize = Math.min(canvas.width, canvas.height) * 0.5;
-            const x = (canvas.width - imgSize) / 2;
-            const y = (canvas.height - imgSize) / 2;
-            
-            ctx.save();
-            ctx.globalAlpha = 0.8 + Math.sin(i / 10) * 0.2;
-            ctx.drawImage(img, x, y, imgSize, imgSize);
-            ctx.restore();
-          };
-        }
-
-        // Animated title
-        ctx.fillStyle = '#65d9ff';
-        ctx.font = `bold ${Math.floor(canvas.height * 0.1)}px Inter, Arial`;
-        ctx.textAlign = 'center';
-        ctx.fillText('th3dr4k3r.ia', canvas.width / 2, canvas.height * 0.15);
-
-        // Subtitle
-        ctx.font = `${Math.floor(canvas.height * 0.04)}px Inter, Arial`;
-        ctx.fillStyle = '#9bb0ca';
-        ctx.fillText('Video Generado con IA', canvas.width / 2, canvas.height * 0.85);
-
-        // Animated circles
-        ctx.fillStyle = `hsla(${i * 6}, 100%, 50%, 0.2)`;
-        const size = (canvas.width * 0.15) + Math.sin(i / 5) * (canvas.width * 0.1);
-        ctx.beginPath();
-        ctx.arc(canvas.width / 2, canvas.height / 2, size / 2, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Animated rectangle
-        ctx.fillStyle = `hsla(${(i * 6) + 180}, 100%, 50%, 0.15)`;
-        const rectSize = (canvas.width * 0.12) + Math.cos(i / 7) * (canvas.width * 0.08);
-        ctx.fillRect(canvas.width / 2 - rectSize / 2, canvas.height / 2 - rectSize / 2, rectSize, rectSize);
-
-        // Duration text at bottom
-        ctx.fillStyle = '#65d9ff';
-        ctx.font = `bold ${Math.floor(canvas.height * 0.06)}px Inter, Arial`;
-        ctx.textAlign = 'center';
-        ctx.fillText(`${videoDuration.value}s`, canvas.width / 2, canvas.height * 0.95);
-      }
-
-      return canvas;
-    }
-
-    // Canvas to Blob (video)
-    function canvasToBlob(canvas) {
-      return new Promise(resolve => {
-        canvas.toBlob(blob => {
-          if (blob) {
-            resolve(blob);
-          } else {
-            resolve(new Blob(['video'], { type: 'video/mp4' }));
-          }
-        }, 'image/jpeg', 0.8);
-      });
     }
 
     // Download Video
@@ -970,7 +995,7 @@
       }
 
       const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const filename = `th3dr4k3r-${timestamp}-${Math.random().toString(36).substr(2, 9)}.mp4`;
+      const filename = `th3dr4k3r-${timestamp}-${Math.random().toString(36).substr(2, 9)}.webm`;
 
       const a = document.createElement('a');
       a.href = generatedVideoUrl;
