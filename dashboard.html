@@ -659,7 +659,7 @@
             </div>
           </div>
 
-          <div style="margin-top: 20px; padding: 14px; background: rgba(79, 124, 255, 0.08); border: 1px solid rgba(79, 124, 255, 0.2); border-radius: 12px; font-size: 0.85rem; color: var(--muted);">
+          <div style="margin-top: 20px; padding: 14px; background: rgba(79, 124, 255, 0.08); border: 1px solid rgba(79, 124, 255, 0.2); border-radius: 12px; font-size: 0.85rem; color: var(--muted[...]
             <strong style="color: var(--cyan);">💡 Consejo:</strong> Describe con detalles específicos como movimiento de cámara, iluminación, velocidad y atmósfera para mejores resultados.
           </div>
         </div>
@@ -935,35 +935,67 @@
       ctx.fillText(`${videoDuration.value}s`, width / 2, height * 0.92);
     }
 
-    // Generate Video
+    // Generate Video - NEW: call backend /api/generate (Replicate)
     generateBtn.addEventListener('click', async () => {
       const prompt = videoPrompt.value.trim();
-      
       if (!prompt) {
         alert('Por favor, describe lo que quieres generar');
         return;
       }
 
-      // Show loading
+      // Show loading UI
       generatingStatus.classList.add('active');
       generateBtn.disabled = true;
       generateBtn.textContent = 'Generando...';
 
       try {
-        // Simular generación
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        const durationVal = parseInt(videoDuration.value) || 10;
+        const endpoint = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+          ? 'http://localhost:3000/api/generate'
+          : '/api/generate';
 
-        // Generar el video
-        const videoBlob = await createVideoWithCanvas();
-        generatedVideoUrl = URL.createObjectURL(videoBlob);
-        generatedVideoBlob = videoBlob;
+        const payload = {
+          prompt,
+          duration: durationVal,
+          aspectRatio: aspectRatio.value,
+          model: modelSelect.value,
+          style: styleSelect.value,
+          sound: soundSelect.value,
+          nsfw: Boolean(document.getElementById('nsfwConsent').checked)
+        };
 
-        // Mostrar video
+        if (uploadedImageData) {
+          // Send base64 image if user uploaded one (server should support it)
+          payload.init_image = uploadedImageData;
+        }
+
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!resp.ok) {
+          const txt = await resp.text();
+          throw new Error('Servidor: ' + (txt || resp.status));
+        }
+
+        const data = await resp.json();
+
+        if (!data.ok || !data.url) {
+          throw new Error(data.error || 'Respuesta inválida del servidor');
+        }
+
+        // Use URL returned by backend (should be a publicly accessible MP4)
+        generatedVideoUrl = data.url;
+        generatedVideoBlob = null;
+
+        // Display video
         displayGeneratedVideo();
 
-        // Actualizar información
+        // Update meta info
         document.getElementById('videoTitle').textContent = prompt.substring(0, 40) + (prompt.length > 40 ? '...' : '');
-        document.getElementById('videoDurationDisplay').textContent = videoDuration.value + 's';
+        document.getElementById('videoDurationDisplay').textContent = durationVal + 's';
         document.getElementById('videoFormatDisplay').textContent = aspectRatio.value;
         document.getElementById('videoModelDisplay').textContent = modelSelect.options[modelSelect.selectedIndex].text;
         document.getElementById('videoTimeDisplay').textContent = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
@@ -972,9 +1004,17 @@
         videoInfoContainer.classList.add('active');
         downloadBtn.style.display = 'block';
 
+        // Optional: update usage counter (if you enforce limits client-side)
+        const usageCounter = document.getElementById('usageCounter');
+        if (usageCounter) {
+          // simple increment (server should be authoritative)
+          const current = Number(usageCounter.textContent) || 0;
+          usageCounter.textContent = (current + 1).toString();
+        }
+
       } catch (error) {
-        console.error('Error:', error);
-        alert('Error al generar el video: ' + error.message);
+        console.error('Generation error:', error);
+        alert('Error al generar el video: ' + (error.message || error));
         generatingStatus.classList.remove('active');
       } finally {
         generateBtn.disabled = false;
@@ -982,7 +1022,7 @@
       }
     });
 
-    // Crear video con canvas
+    // Crear video con canvas (local fallback) - kept for compatibility
     function createVideoWithCanvas() {
       return new Promise((resolve, reject) => {
         try {
@@ -1047,13 +1087,25 @@
       videoWrapper.style.position = 'relative';
       
       const video = document.createElement('video');
-      video.src = generatedVideoUrl;
       video.controls = true;
       video.autoplay = true;
       video.style.width = '100%';
       video.style.height = 'auto';
       video.style.display = 'block';
       video.style.borderRadius = '12px';
+
+      // prefer MP4 source when available
+      if (generatedVideoUrl) {
+        const source = document.createElement('source');
+        source.src = generatedVideoUrl;
+        // set type if extension known
+        if (generatedVideoUrl.endsWith('.mp4')) source.type = 'video/mp4';
+        video.appendChild(source);
+        video.src = generatedVideoUrl;
+      } else if (generatedVideoBlob) {
+        const blobUrl = URL.createObjectURL(generatedVideoBlob);
+        video.src = blobUrl;
+      }
 
       const durationBadge = document.createElement('div');
       durationBadge.className = 'duration-display';
@@ -1062,27 +1114,82 @@
       videoWrapper.appendChild(video);
       videoWrapper.appendChild(durationBadge);
       videoContent.appendChild(videoWrapper);
+
+      // try to autoplay muted to satisfy browser policies
+      video.muted = true;
+      const p = video.play();
+      if (p && typeof p.then === 'function') {
+        p.catch(() => { /* autoplay may be blocked */ });
+      }
+
+      // enable download button
+      if (downloadBtn) {
+        downloadBtn.disabled = false;
+      }
     }
 
-    // Download Video
-    downloadBtn.addEventListener('click', () => {
-      if (!generatedVideoUrl) {
+    // Download Video - works for both remote MP4 URLs and local blobs
+    downloadBtn.addEventListener('click', async () => {
+      const url = generatedVideoUrl;
+      if (!url && !generatedVideoBlob) {
         alert('No hay video para descargar');
         return;
       }
 
       const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const soundLabel = soundSelect.value !== 'none' ? `-${soundSelect.value}` : '';
-      const filename = `th3dr4k3r-${timestamp}${soundLabel}-${Math.random().toString(36).substr(2, 9)}.webm`;
+      let filename = `th3dr4k3r-${timestamp}${soundLabel}-${Math.random().toString(36).substr(2, 9)}`;
 
-      const a = document.createElement('a');
-      a.href = generatedVideoUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      try {
+        if (url) {
+          const extMatch = url.split('?')[0].split('.').pop();
+          const ext = extMatch && extMatch.length <= 4 ? extMatch : 'mp4';
+          filename = `${filename}.${ext}`;
 
-      alert('✅ Descarga iniciada: ' + filename);
+          // Try anchor download (may be blocked for cross-origin without CORS headers)
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          showToast && showToast('Descarga iniciada: ' + filename);
+          return;
+        }
+
+        // If we have a blob
+        if (generatedVideoBlob) {
+          const blobUrl = URL.createObjectURL(generatedVideoBlob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = filename + '.webm';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(blobUrl);
+          showToast && showToast('Descarga iniciada: ' + filename + '.webm');
+          return;
+        }
+      } catch (err) {
+        console.warn('Anchor download failed, falling back to fetch', err);
+        try {
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error('download failed');
+          const blob = await resp.blob();
+          const objUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = objUrl;
+          a.download = filename + (blob.type === 'video/mp4' ? '.mp4' : '.webm');
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(objUrl);
+          showToast && showToast('Descarga completada: ' + a.download);
+        } catch (err2) {
+          alert('Error al descargar el archivo: ' + err2.message);
+          console.error('[Download Error]', err2);
+        }
+      }
     });
 
     // Premium button
