@@ -394,6 +394,7 @@
       width: 100%;
       height: auto;
       display: block;
+      border-radius: 12px;
     }
 
     .video-placeholder {
@@ -476,6 +477,20 @@
 
     .generating-status.active {
       display: flex;
+    }
+
+    /* Video Duration Display */
+    .duration-display {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.6);
+      color: var(--cyan);
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      backdrop-filter: blur(10px);
     }
 
     /* Responsive */
@@ -644,7 +659,7 @@
               <span>Generando video...</span>
             </div>
 
-            <div class="video-player">
+            <div class="video-player" id="videoPlayerContainer">
               <div id="videoContent">
                 <div class="video-placeholder">
                   <div class="placeholder-icon">🎥</div>
@@ -719,6 +734,7 @@
     const videoContent = document.getElementById('videoContent');
     const videoInfoContainer = document.getElementById('videoInfoContainer');
     const generatingStatus = document.getElementById('generatingStatus');
+    const videoPlayerContainer = document.getElementById('videoPlayerContainer');
 
     // Image Upload Handling
     const uploadArea = document.getElementById('uploadArea');
@@ -833,13 +849,28 @@
     // Display Generated Video
     function displayGeneratedVideo() {
       videoContent.innerHTML = '';
+      
+      // Crear contenedor relativo para el badge de duración
+      const videoWrapper = document.createElement('div');
+      videoWrapper.style.position = 'relative';
+      
       const video = document.createElement('video');
       video.src = generatedVideoUrl;
       video.controls = true;
       video.autoplay = true;
       video.style.width = '100%';
+      video.style.height = 'auto';
+      video.style.display = 'block';
       video.style.borderRadius = '12px';
-      videoContent.appendChild(video);
+
+      // Badge con la duración
+      const durationBadge = document.createElement('div');
+      durationBadge.className = 'duration-display';
+      durationBadge.textContent = `⏱️ ${videoDuration.value}s`;
+
+      videoWrapper.appendChild(video);
+      videoWrapper.appendChild(durationBadge);
+      videoContent.appendChild(videoWrapper);
     }
 
     // Create Demo Video Canvas (with optional image integration)
@@ -907,6 +938,12 @@
         ctx.fillStyle = `hsla(${(i * 6) + 180}, 100%, 50%, 0.15)`;
         const rectSize = (canvas.width * 0.12) + Math.cos(i / 7) * (canvas.width * 0.08);
         ctx.fillRect(canvas.width / 2 - rectSize / 2, canvas.height / 2 - rectSize / 2, rectSize, rectSize);
+
+        // Duration text at bottom
+        ctx.fillStyle = '#65d9ff';
+        ctx.font = `bold ${Math.floor(canvas.height * 0.06)}px Inter, Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`${videoDuration.value}s`, canvas.width / 2, canvas.height * 0.95);
       }
 
       return canvas;
