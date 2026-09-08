@@ -605,6 +605,19 @@
             </div>
           </div>
 
+          <!-- Sound Selection -->
+          <div class="form-group">
+            <label class="form-label" for="soundSelect">🎵 Música de fondo</label>
+            <select id="soundSelect">
+              <option value="none">Sin sonido</option>
+              <option value="ambient">Sonido Ambiente</option>
+              <option value="upbeat">Música Alegre</option>
+              <option value="epic">Épico</option>
+              <option value="chill">Relajante</option>
+              <option value="tech">Tecnológico</option>
+            </select>
+          </div>
+
           <!-- Image Upload Section -->
           <div class="image-upload-section">
             <h3 class="form-label" style="margin-bottom: 12px;">📸 Agregar Imagen Personal</h3>
@@ -700,8 +713,140 @@
     </div>
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/canvas-to-video@1.0.0/dist/index.umd.js"></script>
   <script>
+    // Web Audio API - Generador de sonidos sintéticos
+    class SoundGenerator {
+      constructor(duration) {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        this.duration = duration;
+      }
+
+      generateAmbient() {
+        const ctx = this.audioContext;
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+
+        oscillator.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
+
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(200, ctx.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + this.duration);
+        
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + this.duration);
+
+        oscillator.start(ctx.currentTime);
+        oscillator.stop(ctx.currentTime + this.duration);
+      }
+
+      generateUpbeat() {
+        const ctx = this.audioContext;
+        const now = ctx.currentTime;
+        
+        for (let i = 0; i < 8; i++) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          
+          osc.frequency.value = 400 + (i * 100);
+          osc.type = 'square';
+          
+          const time = now + (i * 0.2);
+          gain.gain.setValueAtTime(0.1, time);
+          gain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+          
+          osc.start(time);
+          osc.stop(time + 0.1);
+        }
+      }
+
+      generateEpic() {
+        const ctx = this.audioContext;
+        const now = ctx.currentTime;
+        
+        const bass = ctx.createOscillator();
+        const bassGain = ctx.createGain();
+        
+        bass.connect(bassGain);
+        bassGain.connect(ctx.destination);
+        
+        bass.type = 'sine';
+        bass.frequency.setValueAtTime(100, now);
+        bass.frequency.exponentialRampToValueAtTime(150, now + this.duration);
+        
+        bassGain.gain.setValueAtTime(0.15, now);
+        bassGain.gain.exponentialRampToValueAtTime(0.05, now + this.duration);
+        
+        bass.start(now);
+        bass.stop(now + this.duration);
+      }
+
+      generateChill() {
+        const ctx = this.audioContext;
+        const now = ctx.currentTime;
+        
+        for (let i = 0; i < 3; i++) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          
+          osc.type = 'sine';
+          osc.frequency.value = 200 + (i * 150);
+          
+          gain.gain.setValueAtTime(0.05, now);
+          gain.gain.linearRampToValueAtTime(0.08, now + this.duration * 0.5);
+          gain.gain.linearRampToValueAtTime(0.02, now + this.duration);
+          
+          osc.start(now);
+          osc.stop(now + this.duration);
+        }
+      }
+
+      generateTech() {
+        const ctx = this.audioContext;
+        const now = ctx.currentTime;
+        
+        for (let i = 0; i < 12; i++) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          
+          osc.type = 'sine';
+          osc.frequency.value = 800 + Math.random() * 400;
+          
+          const time = now + (i * (this.duration / 12));
+          gain.gain.setValueAtTime(0.1, time);
+          gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+          
+          osc.start(time);
+          osc.stop(time + 0.05);
+        }
+      }
+
+      renderToAudioData() {
+        const sampleRate = this.audioContext.sampleRate;
+        const length = sampleRate * this.duration;
+        const audioBuffer = this.audioContext.createAudioBuffer(1, length, sampleRate);
+        const data = audioBuffer.getChannelData(0);
+        
+        // Llenar con datos de audio silenciosos (luego se mezclarán con Web Audio)
+        for (let i = 0; i < length; i++) {
+          data[i] = 0;
+        }
+        
+        return audioBuffer;
+      }
+    }
+
     // User Management
     const userNameLabel = document.getElementById('userNameLabel');
     const user = JSON.parse(localStorage.getItem('motionflow_user') || sessionStorage.getItem('motionflow_user') || 'null');
@@ -729,6 +874,7 @@
     const downloadBtn = document.getElementById('downloadBtn');
     const videoPrompt = document.getElementById('videoPrompt');
     const videoDuration = document.getElementById('videoDuration');
+    const soundSelect = document.getElementById('soundSelect');
     const modelSelect = document.getElementById('modelSelect');
     const styleSelect = document.getElementById('styleSelect');
     const aspectRatio = document.getElementById('aspectRatio');
@@ -800,7 +946,7 @@
       uploadArea.style.display = 'block';
     });
 
-    // Generate Video - Improved version
+    // Generate Video with Sound
     generateBtn.addEventListener('click', async () => {
       const prompt = videoPrompt.value.trim();
       
@@ -818,8 +964,8 @@
         // Simulate generation time
         await new Promise(resolve => setTimeout(resolve, 2500));
 
-        // Generate video frames and create WebM/MP4
-        const videoBlob = await generateVideoBlob();
+        // Generate video with sound
+        const videoBlob = await generateVideoWithSound();
         generatedVideoUrl = URL.createObjectURL(videoBlob);
         generatedVideoBlob = videoBlob;
 
@@ -848,8 +994,8 @@
       }
     });
 
-    // Generate Video Blob with proper codec
-    async function generateVideoBlob() {
+    // Generate Video with Audio Track
+    async function generateVideoWithSound() {
       const duration = parseInt(videoDuration.value) || 10;
       const fps = 24;
       const totalFrames = duration * fps;
@@ -871,36 +1017,87 @@
           canvas.height = height;
           const ctx = canvas.getContext('2d');
 
+          // Create audio context and generate sound
+          const soundGenerator = new SoundGenerator(duration);
+          const selectedSound = soundSelect.value;
+
+          // Trigger sound generation
+          if (selectedSound !== 'none') {
+            if (selectedSound === 'ambient') soundGenerator.generateAmbient();
+            else if (selectedSound === 'upbeat') soundGenerator.generateUpbeat();
+            else if (selectedSound === 'epic') soundGenerator.generateEpic();
+            else if (selectedSound === 'chill') soundGenerator.generateChill();
+            else if (selectedSound === 'tech') soundGenerator.generateTech();
+          }
+
           const chunks = [];
           const canvasStream = canvas.captureStream(fps);
-          const mediaRecorder = new MediaRecorder(canvasStream, {
-            mimeType: 'video/webm;codecs=vp9'
-          });
+          
+          // Get audio tracks if sound is selected
+          if (selectedSound !== 'none') {
+            const audioContext = soundGenerator.audioContext;
+            const dest = audioContext.createMediaStreamDestination();
+            const mediaRecorder = new MediaRecorder(new MediaStream([
+              ...canvasStream.getTracks(),
+              ...dest.stream.getTracks()
+            ]), {
+              mimeType: 'video/webm;codecs=vp9'
+            });
 
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) chunks.push(e.data);
-          };
+            mediaRecorder.ondataavailable = (e) => {
+              if (e.data.size > 0) chunks.push(e.data);
+            };
 
-          mediaRecorder.onstop = () => {
-            const blob = new Blob(chunks, { type: 'video/webm' });
-            resolve(blob);
-          };
+            mediaRecorder.onstop = () => {
+              const blob = new Blob(chunks, { type: 'video/webm' });
+              resolve(blob);
+            };
 
-          mediaRecorder.start();
+            mediaRecorder.start();
 
-          // Animate frames
-          let frameIndex = 0;
-          const animationInterval = setInterval(() => {
-            if (frameIndex >= totalFrames) {
-              clearInterval(animationInterval);
-              mediaRecorder.stop();
-              return;
-            }
+            // Animate frames
+            let frameIndex = 0;
+            const animationInterval = setInterval(() => {
+              if (frameIndex >= totalFrames) {
+                clearInterval(animationInterval);
+                mediaRecorder.stop();
+                return;
+              }
 
-            const progress = frameIndex / totalFrames;
-            drawFrame(ctx, width, height, frameIndex, progress);
-            frameIndex++;
-          }, 1000 / fps);
+              const progress = frameIndex / totalFrames;
+              drawFrame(ctx, width, height, frameIndex, progress);
+              frameIndex++;
+            }, 1000 / fps);
+          } else {
+            // Sin sonido, solo video
+            const mediaRecorder = new MediaRecorder(canvasStream, {
+              mimeType: 'video/webm;codecs=vp9'
+            });
+
+            mediaRecorder.ondataavailable = (e) => {
+              if (e.data.size > 0) chunks.push(e.data);
+            };
+
+            mediaRecorder.onstop = () => {
+              const blob = new Blob(chunks, { type: 'video/webm' });
+              resolve(blob);
+            };
+
+            mediaRecorder.start();
+
+            let frameIndex = 0;
+            const animationInterval = setInterval(() => {
+              if (frameIndex >= totalFrames) {
+                clearInterval(animationInterval);
+                mediaRecorder.stop();
+                return;
+              }
+
+              const progress = frameIndex / totalFrames;
+              drawFrame(ctx, width, height, frameIndex, progress);
+              frameIndex++;
+            }, 1000 / fps);
+          }
 
         } catch (error) {
           reject(error);
@@ -995,7 +1192,8 @@
       }
 
       const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const filename = `th3dr4k3r-${timestamp}-${Math.random().toString(36).substr(2, 9)}.webm`;
+      const soundLabel = soundSelect.value !== 'none' ? `-${soundSelect.value}` : '';
+      const filename = `th3dr4k3r-${timestamp}${soundLabel}-${Math.random().toString(36).substr(2, 9)}.webm`;
 
       const a = document.createElement('a');
       a.href = generatedVideoUrl;
@@ -1012,7 +1210,7 @@
       alert('🚀 Función de Premium próximamente');
     });
 
-    console.log('✅ Dashboard cargado correctamente');
+    console.log('✅ Dashboard cargado correctamente con soporte de audio');
   </script>
 </body>
 </html>
